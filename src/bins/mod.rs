@@ -35,6 +35,20 @@ impl PasteFile {
   }
 }
 
+trait Join {
+  fn join(&self) -> String;
+}
+
+impl Join for Vec<PasteFile> {
+  fn join(&self) -> String {
+    if self.len() == 1 {
+      self.get(0).expect("len() == 1, but no first element").data.clone()
+    } else {
+      self.into_iter().map(|p| format!("--- {} ---\n\n{}", p.name, p.data)).collect::<Vec<String>>().join("\n\n")
+    }
+  }
+}
+
 pub struct Bins {
   pub config: Value,
   pub arguments: Arguments
@@ -159,8 +173,7 @@ impl Bins {
     let url_clone = url.clone();
     let bin = try!(self.get_engine_for_url(&url_clone));
     let files = try!(bin.produce_raw_contents(self, &mut url));
-    let file = some_or_err!(files.get(0), "".into()); // FIXME: use all files
-    Ok(file.data.clone())
+    Ok(files.join())
   }
 
   pub fn get_output(&self) -> Result<String> {
@@ -173,7 +186,7 @@ impl Bins {
       try!(engine.upload_all(self, to_paste))
     } else if to_paste.len() == 1 {
       let file = &to_paste[0];
-      try!(engine.upload(self, file.clone())) // FIXME: shouldn't have to use clone
+      try!(engine.upload_paste(self, file.clone())) // FIXME: shouldn't have to use clone
     } else {
       return Err("no files to upload".into());
     };
@@ -181,6 +194,7 @@ impl Bins {
   }
 }
 
+#[derive(Clone)]
 pub struct FlexibleRange {
   pub ranges: Vec<Range<usize>>
 }
@@ -220,6 +234,16 @@ impl FlexibleRange {
       }
     }
     Ok(FlexibleRange { ranges: range })
+  }
+
+  fn contains(&self, idx: usize) -> bool {
+    self.ranges.iter().any(|r| {
+      if r.start > r.end {
+        idx <= r.start && idx > r.end
+      } else {
+        idx > r.start && idx <= r.end
+      }
+    })
   }
 }
 

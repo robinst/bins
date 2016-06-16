@@ -15,7 +15,8 @@ pub struct Arguments {
   pub copy: bool,
   pub input: Option<String>,
   pub range: Option<FlexibleRange>,
-  pub raw_urls: bool
+  pub raw_urls: bool,
+  pub all: bool
 }
 
 include!(concat!(env!("OUT_DIR"), "/git_short_tag.rs"));
@@ -58,7 +59,8 @@ pub fn get_arguments(config: &Value) -> Result<Arguments> {
     copy: config.lookup_bool_or("defaults.copy", false),
     input: None,
     range: None,
-    raw_urls: false
+    raw_urls: false,
+    all: false
   };
   let name = get_name();
   let version = get_version();
@@ -122,6 +124,11 @@ pub fn get_arguments(config: &Value) -> Result<Arguments> {
       .use_delimiter(false)
       .requires("input")
       .conflicts_with("files"))
+    .arg(Arg::with_name("all")
+      .short("L")
+      .long("all")
+      .requires("input")
+      .conflicts_with_all(&["files", "range"]))
     .arg(Arg::with_name("raw-urls")
       .short("r")
       .long("raw-urls")
@@ -151,6 +158,7 @@ pub fn get_arguments(config: &Value) -> Result<Arguments> {
     arguments.range = Some(try!(FlexibleRange::parse(range)));
   }
   arguments.raw_urls = res.is_present("raw-urls");
+  arguments.all = res.is_present("all");
   if res.is_present("private") {
     arguments.private = true;
   } else if res.is_present("public") {

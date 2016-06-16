@@ -1,4 +1,4 @@
-use bins::engines::{Bin, GeneratesIndex, Index, ProduceRawContent, ProduceRawUrls, ProduceUrls, UploadContent};
+use bins::engines::{Bin, GenerateIndex, Index, ProduceRawContent, ProduceRawInfo, ProduceInfo, RemotePasteFile, UploadContent};
 use bins::error::*;
 use bins::network::download::Downloader;
 use bins::network::upload::{ProduceUploadBody, Uploader};
@@ -32,14 +32,15 @@ impl Bin for Sprunge {
 
 unsafe impl Sync for Sprunge {}
 
-impl ProduceUrls for Sprunge {
-  fn produce_urls(&self, bins: &Bins, res: Response, urls: Vec<&Url>) -> Result<Vec<Url>> {
-    Ok(urls.into_iter().map(|u| u.clone()).collect())
+impl ProduceInfo for Sprunge {
+  fn produce_info(&self, bins: &Bins, res: Response, urls: Vec<&Url>) -> Result<Vec<RemotePasteFile>> {
+    unimplemented!();
+    // Ok(urls.into_iter().map(|u| u.clone()).collect())
   }
 }
 
-impl ProduceRawUrls for Sprunge {
-  fn produce_raw_urls(&self, bins: &Bins, urls: Vec<&Url>) -> Result<Vec<Url>> {
+impl ProduceRawInfo for Sprunge {
+  fn produce_raw_info(&self, bins: &Bins, urls: Vec<&Url>) -> Result<Vec<RemotePasteFile>> {
     let raw_urls: Vec<Url> = urls.into_iter()
       .map(|u| {
         let mut u = u.clone();
@@ -50,19 +51,21 @@ impl ProduceRawUrls for Sprunge {
     let indices: LinkedHashMap<Url, Result<Index>> = try!(raw_urls.into_iter()
       .map(|u| self.download(&u).map(|c| (u, Index::parse(c))))
       .collect());
-    let mut urls: Vec<Url> = vec![];
+    let mut urls: Vec<RemotePasteFile> = Vec::new();
     for (url, res) in indices.into_iter() {
       match *res {
         Ok(ref i) => {
-          for (_, url) in i.files.into_iter() {
-            urls.push(url.clone());
+          for (name, url) in i.files.into_iter() {
+            urls.push(RemotePasteFile { name: name.clone(), url: url.clone() });
           }
         }
         Err(ref e) => {
           if let ErrorKind::InvalidIndexError = *e.kind() {} else {
             return Err(e.to_string().into());
           }
-          urls.push(url.clone());
+          let url = url.clone();
+          let name = some_or_err!(url.path_segments().and_then(|s| s.last()), "paste url was a root url".into());
+          urls.push(RemotePasteFile { name: name.to_owned(), url: url.clone() });
         }
       }
     }
@@ -72,10 +75,10 @@ impl ProduceRawUrls for Sprunge {
 
 impl ProduceRawContent for Sprunge {}
 
-impl GeneratesIndex for Sprunge {
+impl GenerateIndex for Sprunge {
   fn generate_index(&self, bins: &Bins, content: Vec<PasteFile>) -> Result<Index> {
     let names: Vec<String> = (&content).into_iter().map(|p| p.name.clone()).collect();
-    let urls: Vec<Url> = try!(content.into_iter().map(|p| (self as &UploadContent).upload(bins, p)).collect());
+    let urls: Vec<Url> = try!(content.into_iter().map(|p| self.upload_paste(bins, p)).collect());
     let uploads: LinkedHashMap<String, Url> = names.into_iter().zip(urls.into_iter()).collect();
     Ok(Index { files: uploads })
   }
@@ -97,10 +100,10 @@ impl Uploader for Sprunge {}
 impl Downloader for Sprunge {}
 
 impl UploadContent for Sprunge {
-  fn upload(&self, bins: &Bins, content: PasteFile) -> Result<Url> {
+  fn upload_paste(&self, bins: &Bins, content: PasteFile) -> Result<Url> {
     let url = try!(network::parse_url("http://sprunge.us/"));
     *self.body.borrow_mut() = Some(content.data);
-    let mut response = try!((self as &Uploader).upload(&url));
+    let mut response = try!(self.upload(&url));
     *self.body.borrow_mut() = None;
     network::parse_url(try!(network::read_response(&mut response)))
   }

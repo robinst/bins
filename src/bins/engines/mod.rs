@@ -1,13 +1,16 @@
 pub mod sprunge;
 
 use bins::error::*;
-use bins::{Bins, PasteFile};
-use hyper::client::{Client, Response};
-use hyper::Url;
+use bins::network::download::Downloader;
+use bins::network::upload::Uploader;
 use bins::network;
+use bins::{Bins, PasteFile};
+use hyper::client::Response;
+use hyper::Url;
 use linked_hash_map::LinkedHashMap;
 use std::io::Read;
 use std::iter::repeat;
+use std::collections::HashMap;
 
 pub struct Index {
   pub files: LinkedHashMap<String, Url>
@@ -50,38 +53,49 @@ impl Index {
   }
 }
 
-/// Produce URLs to HTML content from URLs to HTML content.
-///
-/// Generally, this should produce the same URLs as the URLs passed to it, unless the user is
-/// requesting a specific file from a multi-file paste.
-pub trait ProduceUrls {
-  fn produce_urls(&self, bins: &Bins, res: Response, urls: Vec<&Url>) -> Result<Vec<Url>>;
+pub struct RemotePasteFile {
+  pub name: String,
+  pub url: Url
 }
 
-/// Produce URLs to raw content from URLs to HTML content.
-pub trait ProduceRawUrls {
-  fn produce_raw_urls(&self, bins: &Bins, urls: Vec<&Url>) -> Result<Vec<Url>>;
+/// Produce information about HTML content from URLs to HTML content.
+pub trait ProduceInfo {
+  fn produce_info(&self, bins: &Bins, res: Response, urls: Vec<&Url>) -> Result<Vec<RemotePasteFile>>;
+}
+
+/// Produce information about raw content from URLs to HTML content.
+pub trait ProduceRawInfo {
+  fn produce_raw_info(&self, bins: &Bins, urls: Vec<&Url>) -> Result<Vec<RemotePasteFile>>;
 }
 
 /// Produce raw content from a URL to HTML content.
-pub trait ProduceRawContent: ProduceRawUrls {
+pub trait ProduceRawContent: ProduceRawInfo + Downloader {
   fn produce_raw_contents(&self, bins: &Bins, url: &Url) -> Result<Vec<PasteFile>> {
-    let client = Client::new();
-    let raw_urls = try!(self.produce_raw_urls(bins, vec![url]));
-    let url = some_or_err!(raw_urls.get(0),
-                           "no urls available from raw_urls (this is a bug)".into());
-    let mut res = try!(client.get(url.as_str()).send());
-    let mut contents = String::new();
-    try!(res.read_to_string(&mut contents));
-    let name = some_or_err!(some_or_err!(url.path_segments(), "url was a root url".into()).last(),
-                            "url did not have a last segment".into());
-    Ok(vec![PasteFile::new(name.to_owned(), contents)])
+    let raw_info = try!(self.produce_raw_info(bins, vec![url]));
+    let raw_info: Vec<RemotePasteFile> = if bins.arguments.files.len() > 0 {
+      let files: Vec<String> = bins.arguments.files.iter().map(|s| s.to_lowercase()).collect();
+      raw_info.into_iter().filter(|p| files.contains(&p.name.to_lowercase())).collect()
+    } else if let Some(ref range) = bins.arguments.range {
+      let mut numbered_info: HashMap<usize, RemotePasteFile> = raw_info.into_iter().enumerate().collect();
+      try!(range.clone().into_iter().map(|n| numbered_info.remove(&n).ok_or(format!("file {} not found", n))).collect())
+    } else if bins.arguments.all {
+      raw_info
+    } else {
+      return Err("paste had multiple files, but no behavior was specified on the command line".into());
+    };
+    if bins.arguments.raw_urls {
+      return Ok(vec![PasteFile { name: "urls".to_owned(), data: raw_info.into_iter().map(|r| r.url.as_str().to_owned()).collect::<Vec<_>>().join("\n") }]);
+    }
+    let names: Vec<String> = raw_info.iter().map(|p| p.name.clone()).collect();
+    let all_contents: Vec<String> = try!(raw_info.iter().map(|p| self.download(&p.url)).collect());
+    let files: LinkedHashMap<String, String> = names.into_iter().zip(all_contents.into_iter()).collect();
+    Ok(files.into_iter().map(|(name, content)| PasteFile { name: name.clone(), data: content.clone() }).collect())
   }
 }
 
 /// Produce a URL to HTML content from raw content.
-pub trait UploadContent {
-  fn upload(&self, bins: &Bins, content: PasteFile) -> Result<Url>;
+pub trait UploadContent: Uploader {
+  fn upload_paste(&self, bins: &Bins, content: PasteFile) -> Result<Url>;
 }
 
 /// Produce a URL to HTML content from a batch of raw content.
@@ -90,25 +104,25 @@ pub trait UploadBatchContent: UploadContent {
 }
 
 impl<T> UploadBatchContent for T
-  where T: GeneratesIndex + UploadContent
+  where T: GenerateIndex + UploadContent
 {
   fn upload_all(&self, bins: &Bins, content: Vec<PasteFile>) -> Result<Url> {
     let index = try!(self.generate_index(bins, content));
-    (self as &UploadContent).upload(bins,
-                                    PasteFile {
-                                      name: "index.md".to_owned(),
-                                      data: index.to_string()
-                                    })
+    self.upload_paste(bins,
+                      PasteFile {
+                        name: "index.md".to_owned(),
+                        data: index.to_string()
+                      })
   }
 }
 
 /// Generate an index for multiple files.
-pub trait GeneratesIndex {
+pub trait GenerateIndex {
   fn generate_index(&self, bins: &Bins, content: Vec<PasteFile>) -> Result<Index>;
 }
 
 /// A bin, which can upload content in raw form and download content in raw and HTML form.
-pub trait Bin: Sync + ProduceUrls + ProduceRawContent + UploadBatchContent {
+pub trait Bin: Sync + ProduceInfo + ProduceRawContent + UploadBatchContent {
   fn get_name(&self) -> &str;
 
   fn get_domain(&self) -> &str;
