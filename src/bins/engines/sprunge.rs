@@ -1,4 +1,4 @@
-use bins::engines::{Bin, GenerateIndex, Index, ProduceInfo, ProduceRawContent, ProduceRawInfo, RemotePasteFile,
+use bins::engines::{Bin, ConvertUrlsToRawUrls, GenerateIndex, Index, ProduceInfo, ProduceRawContent, RemotePasteFile,
                     UploadContent};
 use bins::error::*;
 use bins::network::download::Downloader;
@@ -40,44 +40,15 @@ impl ProduceInfo for Sprunge {
   }
 }
 
-impl ProduceRawInfo for Sprunge {
-  fn produce_raw_info(&self, bins: &Bins, urls: Vec<&Url>) -> Result<Vec<RemotePasteFile>> {
-    let raw_urls: Vec<Url> = urls.into_iter()
+impl ConvertUrlsToRawUrls for Sprunge {
+  fn convert_urls_to_raw_urls(&self, urls: Vec<&Url>) -> Result<Vec<Url>> {
+    Ok(urls.into_iter()
       .map(|u| {
         let mut u = u.clone();
         u.set_query(None);
         u
       })
-      .collect();
-    let indices: LinkedHashMap<Url, Result<Index>> = try!(raw_urls.into_iter()
-      .map(|u| self.download(&u).map(|c| (u, Index::parse(c))))
-      .collect());
-    let mut urls: Vec<RemotePasteFile> = Vec::new();
-    for (url, res) in indices.into_iter() {
-      match *res {
-        Ok(ref i) => {
-          for (name, url) in i.files.into_iter() {
-            urls.push(RemotePasteFile {
-              name: name.clone(),
-              url: url.clone()
-            });
-          }
-        }
-        Err(ref e) => {
-          if let ErrorKind::InvalidIndexError = *e.kind() {} else {
-            return Err(e.to_string().into());
-          }
-          let url = url.clone();
-          let name = some_or_err!(url.path_segments().and_then(|s| s.last()),
-                                  "paste url was a root url".into());
-          urls.push(RemotePasteFile {
-            name: name.to_owned(),
-            url: url.clone()
-          });
-        }
-      }
-    }
-    Ok(urls)
+      .collect())
   }
 }
 

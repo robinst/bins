@@ -68,6 +68,47 @@ pub trait ProduceRawInfo {
   fn produce_raw_info(&self, bins: &Bins, urls: Vec<&Url>) -> Result<Vec<RemotePasteFile>>;
 }
 
+impl<T> ProduceRawInfo for T
+  where T: ConvertUrlsToRawUrls + Downloader
+{
+  fn produce_raw_info(&self, _: &Bins, urls: Vec<&Url>) -> Result<Vec<RemotePasteFile>> {
+    let raw_urls = try!(self.convert_urls_to_raw_urls(urls));
+    let indices: LinkedHashMap<Url, Result<Index>> = try!(raw_urls.into_iter()
+      .map(|u| self.download(&u).map(|c| (u, Index::parse(c))))
+      .collect());
+    let mut urls: Vec<RemotePasteFile> = Vec::new();
+    for (url, res) in indices.into_iter() {
+      match *res {
+        Ok(ref i) => {
+          for (name, url) in i.files.into_iter() {
+            urls.push(RemotePasteFile {
+              name: name.clone(),
+              url: url.clone()
+            });
+          }
+        }
+        Err(ref e) => {
+          if let ErrorKind::InvalidIndexError = *e.kind() {} else {
+            return Err(e.to_string().into());
+          }
+          let url = url.clone();
+          let name = some_or_err!(url.path_segments().and_then(|s| s.last()),
+                                  "paste url was a root url".into());
+          urls.push(RemotePasteFile {
+            name: name.to_owned(),
+            url: url.clone()
+          });
+        }
+      }
+    }
+    Ok(urls)
+  }
+}
+
+pub trait ConvertUrlsToRawUrls {
+  fn convert_urls_to_raw_urls(&self, urls: Vec<&Url>) -> Result<Vec<Url>>;
+}
+
 /// Produce raw content from a URL to HTML content.
 pub trait ProduceRawContent: ProduceRawInfo + Downloader {
   fn produce_raw_contents(&self, bins: &Bins, url: &Url) -> Result<Vec<PasteFile>> {
