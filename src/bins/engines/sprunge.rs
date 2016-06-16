@@ -1,4 +1,5 @@
-use bins::engines::{Bin, GenerateIndex, Index, ProduceRawContent, ProduceRawInfo, ProduceInfo, RemotePasteFile, UploadContent};
+use bins::engines::{Bin, GenerateIndex, Index, ProduceInfo, ProduceRawContent, ProduceRawInfo, RemotePasteFile,
+                    UploadContent};
 use bins::error::*;
 use bins::network::download::Downloader;
 use bins::network::upload::{ProduceUploadBody, Uploader};
@@ -56,7 +57,10 @@ impl ProduceRawInfo for Sprunge {
       match *res {
         Ok(ref i) => {
           for (name, url) in i.files.into_iter() {
-            urls.push(RemotePasteFile { name: name.clone(), url: url.clone() });
+            urls.push(RemotePasteFile {
+              name: name.clone(),
+              url: url.clone()
+            });
           }
         }
         Err(ref e) => {
@@ -64,8 +68,12 @@ impl ProduceRawInfo for Sprunge {
             return Err(e.to_string().into());
           }
           let url = url.clone();
-          let name = some_or_err!(url.path_segments().and_then(|s| s.last()), "paste url was a root url".into());
-          urls.push(RemotePasteFile { name: name.to_owned(), url: url.clone() });
+          let name = some_or_err!(url.path_segments().and_then(|s| s.last()),
+                                  "paste url was a root url".into());
+          urls.push(RemotePasteFile {
+            name: name.to_owned(),
+            url: url.clone()
+          });
         }
       }
     }

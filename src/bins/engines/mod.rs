@@ -84,12 +84,22 @@ pub trait ProduceRawContent: ProduceRawInfo + Downloader {
       return Err("paste had multiple files, but no behavior was specified on the command line".into());
     };
     if bins.arguments.raw_urls {
-      return Ok(vec![PasteFile { name: "urls".to_owned(), data: raw_info.into_iter().map(|r| r.url.as_str().to_owned()).collect::<Vec<_>>().join("\n") }]);
+      return Ok(vec![PasteFile {
+                       name: "urls".to_owned(),
+                       data: raw_info.into_iter().map(|r| r.url.as_str().to_owned()).collect::<Vec<_>>().join("\n")
+                     }]);
     }
     let names: Vec<String> = raw_info.iter().map(|p| p.name.clone()).collect();
     let all_contents: Vec<String> = try!(raw_info.iter().map(|p| self.download(&p.url)).collect());
     let files: LinkedHashMap<String, String> = names.into_iter().zip(all_contents.into_iter()).collect();
-    Ok(files.into_iter().map(|(name, content)| PasteFile { name: name.clone(), data: content.clone() }).collect())
+    Ok(files.into_iter()
+      .map(|(name, content)| {
+        PasteFile {
+          name: name.clone(),
+          data: content.clone()
+        }
+      })
+      .collect())
   }
 }
 
