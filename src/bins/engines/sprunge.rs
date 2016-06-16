@@ -1,53 +1,26 @@
+use bins::engines::{Bin, GeneratesIndex, Index, ProduceRawContent, ProduceRawUrls, ProduceUrls, UploadContent};
 use bins::error::*;
+use bins::network::download::Downloader;
+use bins::network::upload::{ProduceUploadBody, Uploader};
+use bins::network;
 use bins::{Bins, PasteFile};
-use bins::engines::Engine;
-use bins::engines::indexed::{IndexedUpload, UploadsIndices, ProducesUrl, ProducesBody};
-use bins::engines::indexed::{ChecksIndices, IndexedDownload, DownloadsFile};
 use hyper::client::Response;
-use hyper::header::Headers;
 use hyper::Url;
+use linked_hash_map::LinkedHashMap;
+use std::cell::RefCell;
 use url::form_urlencoded;
 
 pub struct Sprunge {
-  indexed_upload: IndexedUpload
+  body: RefCell<Option<String>>
 }
 
 impl Sprunge {
   pub fn new() -> Self {
-    Sprunge {
-      indexed_upload: IndexedUpload {
-        url: String::from("http://sprunge.us"),
-        headers: Headers::new(),
-        url_producer: Box::new(SprungeUrlProducer {}),
-        body_producer: Box::new(SprungeBodyProducer {})
-      }
-    }
+    Sprunge { body: RefCell::new(None) }
   }
 }
 
-unsafe impl Sync for Sprunge {}
-
-struct SprungeUrlProducer { }
-
-impl ProducesUrl for SprungeUrlProducer {
-  fn produce_url(&self, _: &Bins, _: Response, data: String) -> Result<String> {
-    Ok(data)
-  }
-}
-
-struct SprungeBodyProducer { }
-
-impl ProducesBody for SprungeBodyProducer {
-  fn produce_body(&self, _: &Bins, data: &PasteFile) -> Result<String> {
-    Ok(form_urlencoded::Serializer::new(String::new())
-      .append_pair("sprunge", &data.data)
-      .finish())
-  }
-}
-
-impl ChecksIndices for Sprunge {}
-
-impl Engine for Sprunge {
+impl Bin for Sprunge {
   fn get_name(&self) -> &str {
     "sprunge"
   }
@@ -55,28 +28,80 @@ impl Engine for Sprunge {
   fn get_domain(&self) -> &str {
     "sprunge.us"
   }
+}
 
-  fn upload(&self, bins: &Bins, data: &[PasteFile]) -> Result<String> {
-    self.indexed_upload.upload(bins, data)
+unsafe impl Sync for Sprunge {}
+
+impl ProduceUrls for Sprunge {
+  fn produce_urls(&self, bins: &Bins, res: Response, urls: Vec<&Url>) -> Result<Vec<Url>> {
+    Ok(urls.into_iter().map(|u| u.clone()).collect())
   }
+}
 
-  fn get_raw(&self, bins: &Bins, url: &mut Url) -> Result<String> {
-    // Remove language specification to get raw text
-    url.set_query(None);
-    let download = IndexedDownload {
-      url: String::from(url.as_str()),
-      headers: Headers::new(),
-      target: None
-    };
-    let downloaded = try!(download.download());
-    match self.check_index(bins, &downloaded) {
-      Ok(mut new_url) => return self.get_raw(bins, &mut new_url),
-      Err(e) => {
-        if let ErrorKind::InvalidIndexError = *e.kind() {} else {
-          return Err(e);
+impl ProduceRawUrls for Sprunge {
+  fn produce_raw_urls(&self, bins: &Bins, urls: Vec<&Url>) -> Result<Vec<Url>> {
+    let raw_urls: Vec<Url> = urls.into_iter()
+      .map(|u| {
+        let mut u = u.clone();
+        u.set_query(None);
+        u
+      })
+      .collect();
+    let indices: LinkedHashMap<Url, Result<Index>> = try!(raw_urls.into_iter()
+      .map(|u| self.download(&u).map(|c| (u, Index::parse(c))))
+      .collect());
+    let mut urls: Vec<Url> = vec![];
+    for (url, res) in indices.into_iter() {
+      match *res {
+        Ok(ref i) => {
+          for (_, url) in i.files.into_iter() {
+            urls.push(url.clone());
+          }
+        }
+        Err(ref e) => {
+          if let ErrorKind::InvalidIndexError = *e.kind() {} else {
+            return Err(e.to_string().into());
+          }
+          urls.push(url.clone());
         }
       }
     }
-    Ok(downloaded)
+    Ok(urls)
+  }
+}
+
+impl ProduceRawContent for Sprunge {}
+
+impl GeneratesIndex for Sprunge {
+  fn generate_index(&self, bins: &Bins, content: Vec<PasteFile>) -> Result<Index> {
+    let names: Vec<String> = (&content).into_iter().map(|p| p.name.clone()).collect();
+    let urls: Vec<Url> = try!(content.into_iter().map(|p| (self as &UploadContent).upload(bins, p)).collect());
+    let uploads: LinkedHashMap<String, Url> = names.into_iter().zip(urls.into_iter()).collect();
+    Ok(Index { files: uploads })
+  }
+}
+
+impl ProduceUploadBody for Sprunge {
+  fn produce_body(&self) -> Result<String> {
+    let body = self.body.borrow();
+    let body = some_ref_or_err!(body,
+                                "no body was prepared for upload (this is a bug)".into());
+    Ok(form_urlencoded::Serializer::new(String::new())
+      .append_pair("sprunge", &body)
+      .finish())
+  }
+}
+
+impl Uploader for Sprunge {}
+
+impl Downloader for Sprunge {}
+
+impl UploadContent for Sprunge {
+  fn upload(&self, bins: &Bins, content: PasteFile) -> Result<Url> {
+    let url = try!(network::parse_url("http://sprunge.us/"));
+    *self.body.borrow_mut() = Some(content.data);
+    let mut response = try!((self as &Uploader).upload(&url));
+    *self.body.borrow_mut() = None;
+    network::parse_url(try!(network::read_response(&mut response)))
   }
 }
