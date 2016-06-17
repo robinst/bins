@@ -1,6 +1,7 @@
 extern crate toml;
 extern crate clap;
 extern crate hyper;
+extern crate rand;
 extern crate rustc_serialize;
 extern crate url;
 #[macro_use]

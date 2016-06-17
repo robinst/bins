@@ -1,3 +1,4 @@
+pub mod bitbucket;
 pub mod gist;
 pub mod hastebin;
 pub mod pastie;
@@ -13,6 +14,7 @@ use hyper::Url;
 lazy_static! {
   pub static ref ENGINES: Vec<Box<Engine>> = {
       vec![
+        Box::new(bitbucket::Bitbucket::new()),
         Box::new(gist::Gist::new()),
         Box::new(hastebin::Hastebin::new()),
         Box::new(pastie::Pastie::new()),

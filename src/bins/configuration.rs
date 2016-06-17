@@ -35,6 +35,14 @@ access_token = ""
 # The API key for pastebin.com. Learn more: http://pastebin.com/api
 # If this is empty, all paste attempts to the pastebin service will fail.
 api_key = ""
+
+[bitbucket]
+# The username for bitbucket.org.
+username = ""
+
+# The app password for bitbucket.org. Generate one in your Bitbucket settings under App passwords.
+# Only the "snippets write" permission is necessary.
+app_password = ""
 "#;
 
 
